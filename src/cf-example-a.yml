@@ -1,0 +1,186 @@
+---
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: All resources required to deploy frontend layer of application.
+
+Parameters:
+
+  DomainName:
+    Type: String
+    Default: 'snbx.link'
+
+  HostedZoneId:
+    Type: String
+    Default: 'Z0193846UI3S3FNT51ME'
+
+  Owner:
+    Type: String
+    Default: 'First Last'
+
+  OwnerEmail:
+    Type: String
+    Default: 'example@example.com'
+
+  Environment:
+    Type: String
+    Default: 'Production'
+    AllowedValues:
+      - 'Development'
+      - 'Testing'
+      - 'Staging'
+      - 'Production'
+
+Resources:
+    # S3 bucket for hosting the static site files.
+    WebAppDeploymentBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: !Ref DomainName
+        WebsiteConfiguration:
+            IndexDocument: 'index.html'
+            ErrorDocument: 'index.html'
+        Tags:
+          - Key: 'Owner'
+            Value: !Ref Owner
+          - Key: 'Owner Email'
+            Value: !Ref OwnerEmail
+          - Key: 'Environment'
+            Value: !Ref Environment
+          - Key: 'Description'
+            Value: 'S3 bucket for hosting the static site files for.'
+
+    # S3 bucket policy giving/restricting access to the CloudFront Origin Access Identity.
+    WebAppDeploymentBucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      DependsOn:
+        - WebAppDeploymentBucket
+        - WebAppCloudFrontDistributionOriginAccessIdentity
+      Properties:
+        Bucket: !Ref WebAppDeploymentBucket
+        PolicyDocument:
+          Statement:
+            - Sid: PolicyForCloudFrontPrivateContent
+              Effect: Allow
+              Principal:
+                CanonicalUser: !GetAtt WebAppCloudFrontDistributionOriginAccessIdentity.S3CanonicalUserId
+              Action:
+                - s3:GetObject
+              Resource:
+                  Fn::Sub:
+                    - 'arn:aws:s3:::${Bucket}/*'
+                    - Bucket: !Ref WebAppDeploymentBucket
+
+    # CloudFront Origin Access Identity.
+    WebAppCloudFrontDistributionOriginAccessIdentity:
+      Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+      Properties:
+        CloudFrontOriginAccessIdentityConfig:
+          Comment: 'Origin Access Identity for accessing CloudFront/S3 hosted static site.'
+
+    # CloudFront distribution.
+    WebAppCloudFrontDistribution:
+      Type: AWS::CloudFront::Distribution
+      DependsOn:
+        - WebAppDeploymentBucket
+        - WebAppCloudFrontDistributionOriginAccessIdentity
+        - WebAppSSLCertificate
+      Properties:
+        DistributionConfig:
+          Comment: 'WebApp CloudFront Distribution'
+          Enabled: true
+          DefaultRootObject: 'index.html'
+          CustomErrorResponses:
+            - ErrorCode: 404
+              ResponseCode: 200
+              ResponsePagePath: /index.html
+          DefaultCacheBehavior:
+            TargetOriginId: 'WebApp Origin'
+            Compress: true
+            AllowedMethods:
+              - DELETE
+              - GET
+              - HEAD
+              - OPTIONS
+              - PATCH
+              - POST
+              - PUT
+            MaxTTL: 43200
+            MinTTL: 1
+            DefaultTTL: 43200
+            ForwardedValues:
+              QueryString: true
+              Cookies:
+                Forward: none
+            ViewerProtocolPolicy: redirect-to-https
+          Origins:
+            - DomainName:
+                Fn::Sub:
+                  - '${DOMAIN}.s3.amazonaws.com'
+                  - DOMAIN: !Ref DomainName
+              Id: 'WebApp Origin'
+              S3OriginConfig:
+                OriginAccessIdentity:
+                  Fn::Sub:
+                    - 'origin-access-identity/cloudfront/${OAI}'
+                    - OAI: !Ref WebAppCloudFrontDistributionOriginAccessIdentity
+          ViewerCertificate:
+              AcmCertificateArn: !Ref  WebAppSSLCertificate
+              MinimumProtocolVersion: 'TLSv1'
+              SslSupportMethod: 'sni-only'
+          Aliases:
+            - Fn::Sub:
+              - '${DOMAIN}'
+              - DOMAIN: !Ref DomainName
+            - Fn::Sub:
+              - 'www.${DOMAIN}'
+              - DOMAIN: !Ref DomainName
+            - Fn::Sub:
+              - '*.${DOMAIN}'
+              - DOMAIN: !Ref DomainName
+        Tags:
+          - Key: 'Owner'
+            Value: !Ref Owner
+          - Key: 'Owner Email'
+            Value: !Ref OwnerEmail
+          - Key: 'Environment'
+            Value: !Ref Environment
+          - Key: 'Description'
+            Value: 'CloudFront Distribution for caching copies of the website in order to reduce latency.'
+
+    # ACM SSL Certificate
+    WebAppSSLCertificate:
+      Type: AWS::CertificateManager::Certificate
+      Properties:
+        DomainName: !Ref DomainName
+        DomainValidationOptions:
+          - DomainName:
+              Fn::Sub:
+                - '*.${DOMAIN}'
+                - DOMAIN: !Ref DomainName
+            HostedZoneId: !Ref HostedZoneId
+        ValidationMethod: 'DNS'
+        CertificateTransparencyLoggingPreference: 'ENABLED'
+        SubjectAlternativeNames:
+          - Fn::Sub:
+              - 'www.${DOMAIN}'
+              - DOMAIN: !Ref DomainName
+          - Fn::Sub:
+            - '*.${DOMAIN}'
+            - DOMAIN: !Ref DomainName
+        Tags:
+          - Key: 'Owner'
+            Value: !Ref Owner
+          - Key: 'Owner Email'
+            Value: !Ref OwnerEmail
+          - Key: 'Environment'
+            Value: !Ref Environment
+          - Key: 'Description'
+            Value: 'ACM SSL Certificate to secure the website domain.'
+
+Outputs:
+  WepAppDeploymentBucket:
+    Value: !Ref WebAppDeploymentBucket
+  WebAppCloudFrontDistribution:
+    Value: !Ref WebAppCloudFrontDistribution
+  WebAppCloudFrontDistributionOriginAccessIdentity:
+    Value: !Ref WebAppCloudFrontDistributionOriginAccessIdentity

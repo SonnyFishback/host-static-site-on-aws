@@ -1,0 +1,67 @@
+---
+
+Parameters:
+
+  DomainName:
+    Type: String
+    Default: 'example.com'
+
+  Owner:
+    Type: String
+    Default: 'First Last'
+
+  OwnerEmail:
+    Type: String
+    Default: 'example@example.com'
+
+  Environment:
+    Type: String
+    Default: 'Production'
+    AllowedValues:
+      - 'Development'
+      - 'Testing'
+      - 'Staging'
+      - 'Production'
+
+Resources:
+    # S3 bucket for hosting the static site files.
+    WebAppDeploymentBucket:
+      Type: 'AWS::S3::Bucket'
+      Properties:
+        BucketName: !Ref DomainName
+        WebsiteConfiguration:
+            IndexDocument: 'index.html'
+            ErrorDocument: 'index.html'
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: false
+          BlockPublicPolicy: false
+          IgnorePublicAcls: false
+          RestrictPublicBuckets: false
+        Tags:
+          - Key: 'Owner'
+            Value: !Ref Owner
+          - Key: 'Owner Email'
+            Value: !Ref OwnerEmail
+          - Key: 'Environment'
+            Value: !Ref Environment
+          - Key: 'Description'
+            Value: 'S3 bucket for hosting the static site files for.'
+
+    # S3 bucket policy giving/restricting access to the CloudFront Origin Access Identity.
+    WebAppDeploymentBucketPublicAccess:
+      Type: 'AWS::S3::BucketPolicy'
+      DependsOn:
+        - WebAppDeploymentBucket
+      Properties:
+        Bucket: !Ref WebAppDeploymentBucket
+        PolicyDocument:
+          Statement:
+            - Sid: 'AllowPublicRead'
+              Effect: 'Allow'
+              Principal: '*'
+              Action:
+                - 's3:GetObject'
+              Resource:
+                Fn::Sub:
+                  - 'arn:aws:s3:::${Bucket}/*'
+                  - Bucket: !Ref WebAppDeploymentBucket
